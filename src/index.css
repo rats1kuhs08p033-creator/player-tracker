@@ -1,0 +1,38 @@
+body {
+  background: #f4f4f4;
+  font-family: sans-serif;
+}
+
+.container {
+  max-width: 900px;
+  margin: auto;
+  padding: 16px;
+}
+
+.form input {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px;
+}
+
+button {
+  width: 100%;
+  padding: 10px;
+}
+
+.chart-wrapper {
+  background: #fff;
+  padding: 12px;
+  margin-top: 20px;
+}
+
+.table {
+  margin-top: 16px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #ddd;
+}
