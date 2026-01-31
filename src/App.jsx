@@ -1,183 +1,172 @@
-import { useState, useMemo, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { useEffect, useMemo, useState } from 'react'
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid
+} from 'recharts'
+import { supabase } from './lib/supabase.js'
 
-// ===== 評価対象メトリクス（1選手前提） =====
-const METRICS = [
-  {
-    key: 'shoulderIR',
-    label: '肩内旋ROM',
-    unit: 'deg',
-    red: -0.10,
-    yellow: -0.05,
-    reasonRed: '可動域が大きく低下（介入推奨）',
-    reasonYellow: '軽度低下（疲労・硬さ疑い）'
-  },
-  {
-    key: 'shoulderER',
-    label: '肩外旋ROM',
-    unit: 'deg',
-    red: -0.10,
-    yellow: -0.05,
-    reasonRed: '外旋可動域低下（投球・打撃リスク）',
-    reasonYellow: '軽度低下（経過観察）'
-  }
-];
+// ===== 判定閾値 =====
+const THRESHOLDS = {
+  RED: -0.1,     // -10%
+  YELLOW: -0.05  // -5%
+}
 
-// ===== 判定ロジック =====
-function evaluate(delta, m) {
-  if (delta <= m.red) return { status: 'RED', reason: m.reasonRed };
-  if (delta <= m.yellow) return { status: 'YELLOW', reason: m.reasonYellow };
-  return { status: 'GREEN', reason: '問題なし' };
+function judge(delta) {
+  if (delta <= THRESHOLDS.RED) return 'RED'
+  if (delta <= THRESHOLDS.YELLOW) return 'YELLOW'
+  return 'GREEN'
 }
 
 export default function App() {
-  const [date, setDate] = useState('');
-  const [values, setValues] = useState({});
-  const [records, setRecords] = useState([]);
+  const [records, setRecords] = useState([])
+  const [date, setDate] = useState('')
+  const [shoulderIR, setShoulderIR] = useState('')
+  const [shoulderER, setShoulderER] = useState('')
+  const [loading, setLoading] = useState(true)
 
-  // ===== 起動時に localStorage から復元 =====
+  // ===== データ取得 =====
+  const fetchRecords = async () => {
+    const { data, error } = await supabase
+      .from('records')
+      .select('*')
+      .order('date', { ascending: true })
+
+    if (!error) setRecords(data ?? [])
+    setLoading(false)
+  }
+
   useEffect(() => {
-    const saved = localStorage.getItem('records');
-    if (saved) setRecords(JSON.parse(saved));
-  }, []);
+    fetchRecords()
+  }, [])
 
-  // ===== 基準値（初回測定をbaseline） =====
-  const baseline = records[0] || {};
+  // ===== baseline（最初の1件） =====
+  const baseline = records.length > 0 ? records[0] : null
+
+  // ===== 最新日の評価 =====
+  const todayEval = useMemo(() => {
+    if (!baseline || records.length === 0) return null
+
+    const latest = records[records.length - 1]
+
+    const irDelta = baseline.shoulder_ir
+      ? (latest.shoulder_ir - baseline.shoulder_ir) / baseline.shoulder_ir
+      : 0
+
+    const erDelta = baseline.shoulder_er
+      ? (latest.shoulder_er - baseline.shoulder_er) / baseline.shoulder_er
+      : 0
+
+    return {
+      date: latest.date,
+      ir: { delta: irDelta, status: judge(irDelta) },
+      er: { delta: erDelta, status: judge(erDelta) }
+    }
+  }, [records])
+
+  // ===== 折れ線グラフ用データ（数値保証） =====
+  const chartData = useMemo(() => {
+    return records
+      .filter(r => r.shoulder_ir != null && r.shoulder_er != null)
+      .map(r => ({
+        date: r.date,
+        shoulder_ir: Number(r.shoulder_ir),
+        shoulder_er: Number(r.shoulder_er)
+      }))
+  }, [records])
 
   // ===== 記録追加 =====
-  const addRecord = () => {
-    if (!date) return;
-    const newRecords = [...records, { date, ...values }];
-    setRecords(newRecords);
-    localStorage.setItem('records', JSON.stringify(newRecords));
-    setValues({});
-    setDate('');
-  };
+  const addRecord = async () => {
+    if (!date) return
 
-  // ===== 記録削除 =====
-  const deleteRecord = (index) => {
-    const newRecords = records.filter((_, i) => i !== index);
-    setRecords(newRecords);
-    localStorage.setItem('records', JSON.stringify(newRecords));
-  };
+    const { error } = await supabase.from('records').insert({
+      date,
+      shoulder_ir: Number(shoulderIR),
+      shoulder_er: Number(shoulderER)
+    })
 
-  // ===== 今日の評価 =====
-  const todayEvaluation = useMemo(() => {
-    if (records.length === 0) return [];
-    const latest = records[records.length - 1];
+    if (error) {
+      alert(error.message)
+      return
+    }
 
-    return METRICS.map(m => {
-      if (baseline[m.key] == null || latest[m.key] == null) return null;
-      const delta = (latest[m.key] - baseline[m.key]) / baseline[m.key];
-      const evalResult = evaluate(delta, m);
-      return {
-        ...m,
-        delta,
-        ...evalResult
-      };
-    }).filter(Boolean);
-  }, [records]);
+    setDate('')
+    setShoulderIR('')
+    setShoulderER('')
+    fetchRecords()
+  }
 
-  // ===== 表示用（RED / YELLOWのみ） =====
-  const alertItems = todayEvaluation.filter(e => e.status !== 'GREEN');
+  if (loading) return <div>Loading...</div>
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Daily ROM Check（Single Player）</h1>
+    <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
+      <h1>Daily ROM Check</h1>
 
-      {/* ===== 判断ゾーン ===== */}
-      {alertItems.length > 0 ? (
-        <div className="mb-6 p-4 border-l-4 border-red-600 bg-red-50">
-          <div className="font-semibold mb-2">▶ 本日の判断：介入検討</div>
-          {alertItems.map(a => (
-            <div key={a.key} className="mb-2">
-              <div className="font-medium">{a.label}</div>
-              <div className="text-sm">
-                Δ {(a.delta * 100).toFixed(1)}% ／ {a.status}
-              </div>
-              <div className="text-sm text-gray-700">理由：{a.reason}</div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="mb-6 p-4 border-l-4 border-green-600 bg-green-50">
-          ▶ 本日の判断：介入不要（許容範囲）
+      {/* ===== 判定表示 ===== */}
+      {todayEval && (
+        <div
+          style={{
+            padding: 12,
+            marginBottom: 20,
+            borderLeft: '6px solid #333',
+            background: '#f5f5f5'
+          }}
+        >
+          <strong>{todayEval.date} の判定</strong>
+          <div>IR：{(todayEval.ir.delta * 100).toFixed(1)}% → {todayEval.ir.status}</div>
+          <div>ER：{(todayEval.er.delta * 100).toFixed(1)}% → {todayEval.er.status}</div>
         </div>
       )}
 
-      {/* ===== 入力ゾーン ===== */}
-      <div className="mb-4">
-        <input
-          type="date"
-          className="border p-2 mr-2 w-full sm:w-auto"
-          value={date}
-          onChange={e => setDate(e.target.value)}
-        />
+      {/* ===== 入力 ===== */}
+      <div style={{ marginBottom: 16 }}>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+        <input type="number" placeholder="IR" value={shoulderIR} onChange={e => setShoulderIR(e.target.value)} />
+        <input type="number" placeholder="ER" value={shoulderER} onChange={e => setShoulderER(e.target.value)} />
+        <button onClick={addRecord}>記録する</button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 mb-4">
-        {METRICS.map(m => (
-          <input
-            key={m.key}
-            type="number"
-            className="border p-2"
-            placeholder={`${m.label} (${m.unit})`}
-            value={values[m.key] || ''}
-            onChange={e => setValues({ ...values, [m.key]: Number(e.target.value) })}
-          />
-        ))}
-      </div>
+      {/* ===== 一覧 ===== */}
+      {records.map(r => (
+        <div key={r.id}>
+          {r.date} ｜ IR: {r.shoulder_ir} ｜ ER: {r.shoulder_er}
+        </div>
+      ))}
 
-      <button
-        onClick={addRecord}
-        className="bg-black text-white px-4 py-2 rounded mb-6"
-      >
-        記録する
-      </button>
-
-      {/* ===== トレンド（確認用） ===== */}
-      {records.length > 1 && (
-        <div className="mt-8">
-          <h2 className="font-semibold mb-2">ROM トレンド（確認用）</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={records}>
+      {/* ===== 折れ線グラフ（直線） ===== */}
+      {chartData.length > 1 && (
+        <div style={{ marginTop: 40, width: '100%', height: 320 }}>
+          <h3>ROM トレンド</h3>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="date" />
               <YAxis />
               <Tooltip />
-              {METRICS.map(m => (
-                <Line
-                  key={m.key}
-                  dataKey={m.key}
-                  name={m.label}
-                  strokeWidth={2}
-                  dot
-                  type="linear"
-                />
-              ))}
+
+              <Line
+                type="linear"
+                dataKey="shoulder_ir"
+                name="Shoulder IR"
+                strokeWidth={2}
+                dot={{ r: 4 }}
+              />
+
+              <Line
+                type="linear"
+                dataKey="shoulder_er"
+                name="Shoulder ER"
+                strokeWidth={2}
+                dot={{ r: 4 }}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
       )}
-
-      {/* ===== 記録一覧（削除可） ===== */}
-      {records.length > 0 && (
-        <div className="mt-8 mb-6">
-          <h2 className="font-semibold mb-2">記録一覧</h2>
-          <ul className="border rounded p-2">
-            {records.map((r, i) => (
-              <li key={i} className="flex justify-between border-b last:border-b-0 py-1">
-                <span>{r.date} - {METRICS.map(m => `${m.label}: ${r[m.key]}${m.unit}`).join(' / ')}</span>
-                <button
-                  className="text-red-600 font-semibold ml-2"
-                  onClick={() => deleteRecord(i)}
-                >
-                  削除
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
-  );
+  )
 }
