@@ -80,14 +80,22 @@ export default function App() {
   }, [records])
 
   // ===== 記録追加 =====
-  const addRecord = async () => {
-    if (!date) return
+ const addRecord = async () => {
+  const { error } = await supabase.from('records').insert({
+    shoulderIR: Number(shoulderIR),
+    shoulderER: Number(shoulderER)
+  })
 
-    const { error } = await supabase.from('records').insert({
-      date,
-      shoulder_ir: Number(shoulderIR),
-      shoulder_er: Number(shoulderER)
-    })
+  if (error) {
+    console.error(error)
+    alert(error.message)
+    return
+  }
+
+  setShoulderIR('')
+  setShoulderER('')
+  fetchRecords()
+}
 
     if (error) {
       alert(error.message)
