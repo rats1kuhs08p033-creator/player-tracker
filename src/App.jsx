@@ -4,20 +4,23 @@ import { supabase } from './lib/supabase'
 export default function App() {
   const [records, setRecords] = useState([])
   const [date, setDate] = useState('')
-  const [shoulder_ir, setShoulder_ir] = useState('')
-  const [shoulder_er, setShoulder_er] = useState('')
+  const [shoulderIr, setShoulderIr] = useState('')
+  const [shoulderEr, setShoulderEr] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // ===== データ取得 =====
+  // ===== 取得 =====
   const fetchRecords = async () => {
     const { data, error } = await supabase
       .from('records')
-      .select('*')
+      .select('id, date, shoulder_ir, shoulder_er, created_at')
       .order('date', { ascending: true })
 
-    if (!error) {
-      setRecords(data)
+    if (error) {
+      console.error('fetch error:', error)
+      return
     }
+
+    setRecords(data)
     setLoading(false)
   }
 
@@ -35,32 +38,31 @@ export default function App() {
     const { error } = await supabase
       .from('records')
       .insert({
-        date: date,
-        shoulder_ir: Number(shoulder_ir),
-        shoulder_er: Number(shoulder_er),
+        date,
+        shoulder_ir: Number(shoulderIr),
+        shoulder_er: Number(shoulderEr),
       })
 
     if (error) {
+      console.error('insert error:', error)
       alert(error.message)
       return
     }
 
     setDate('')
-    setShoulder_ir('')
-    setShoulder_er('')
+    setShoulderIr('')
+    setShoulderEr('')
     fetchRecords()
   }
 
-  if (loading) {
-    return <div>Loading...</div>
-  }
+  if (loading) return <div style={{ padding: 20 }}>Loading...</div>
 
   return (
-    <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
-      <h1>Daily ROM Check</h1>
+    <div style={{ padding: 20, maxWidth: 600, margin: '0 auto' }}>
+      <h1>ROM Records</h1>
 
-      {/* 入力欄 */}
-      <div style={{ marginBottom: 16 }}>
+      {/* 入力 */}
+      <div style={{ marginBottom: 12 }}>
         <input
           type="date"
           value={date}
@@ -69,14 +71,14 @@ export default function App() {
         <input
           type="number"
           placeholder="肩 内旋 (IR)"
-          value={shoulder_ir}
-          onChange={e => setShoulder_ir(e.target.value)}
+          value={shoulderIr}
+          onChange={e => setShoulderIr(e.target.value)}
         />
         <input
           type="number"
           placeholder="肩 外旋 (ER)"
-          value={shoulder_er}
-          onChange={e => setShoulder_er(e.target.value)}
+          value={shoulderEr}
+          onChange={e => setShoulderEr(e.target.value)}
         />
         <button onClick={addRecord}>記録する</button>
       </div>
